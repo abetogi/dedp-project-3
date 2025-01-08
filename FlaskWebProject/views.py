@@ -11,6 +11,7 @@ from FlaskWebProject.forms import LoginForm, PostForm
 from flask_login import current_user, login_user, logout_user, login_required
 from FlaskWebProject.models import User, Post
 import msal
+from msal import ConfidentialClientApplication
 import uuid
 
 imageSourceUrl = 'https://'+ app.config['BLOB_ACCOUNT']  + '.blob.core.windows.net/' + app.config['BLOB_CONTAINER']  + '/'
@@ -41,7 +42,6 @@ def new_post():
         imageSource=imageSourceUrl,
         form=form
     )
-
 
 @app.route('/post/<int:id>', methods=['GET', 'POST'])
 @login_required
@@ -77,6 +77,19 @@ def login():
     auth_url = _build_auth_url(scopes=Config.SCOPE, state=session["state"])
     return render_template('login.html', title='Sign In', form=form, auth_url=auth_url)
 
+@app.route('/logout')
+def logout():
+    logout_user()
+    if session.get("user"): # Used MS Login
+        # Wipe out user and its token cache from session
+        session.clear()
+        # Also logout from your tenant's web session
+        return redirect(
+            Config.AUTHORITY + "/oauth2/v2.0/logout" +
+            "?post_logout_redirect_uri=" + url_for("login", _external=True))
+
+    return redirect(url_for('login'))
+
 @app.route(Config.REDIRECT_PATH)  # Its absolute URL must match your app's redirect_uri set in AAD
 def authorized():
     if request.args.get('state') != session.get("state"):
@@ -93,24 +106,10 @@ def authorized():
         if "error" in result:
             return render_template("auth_error.html", result=result)    
         session["user"] = result.get("id_token_claims")
-        # Note: In a real app, use the 'name' property from session["user"]
         user = User.query.filter_by(username="admin").first()  # Adjust as necessary
         login_user(user)
         _save_cache(cache) 
     return redirect(url_for('home'))
-
-@app.route('/logout')
-def logout():
-    logout_user()
-    if session.get("user"): # Used MS Login
-        # Wipe out user and its token cache from session
-        session.clear()
-        # Also logout from your tenant's web session
-        return redirect(
-            Config.AUTHORITY + "/oauth2/v2.0/logout" +
-            "?post_logout_redirect_uri=" + url_for("login", _external=True))
-
-    return redirect(url_for('login'))
 
 def _load_cache():
     cache = msal.SerializableTokenCache()
